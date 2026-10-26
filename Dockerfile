@@ -7,8 +7,8 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 # Copy all project files
 COPY . .
 
-# Install dependencies and build directly
-RUN pnpm install --no-frozen-lockfile --shamefully-hoist
+# Install dependencies allowing build scripts, then build
+RUN pnpm install --no-frozen-lockfile --shamefully-hoist --config.ignore-build-scripts=false
 RUN pnpm run build
 
 # Stage 2: Serve static files with Nginx

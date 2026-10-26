@@ -1,21 +1,18 @@
-FROM node:20-alpine AS build
+FROM node:20
 WORKDIR /app
 
-# Enable pnpm inside the container
+# Enable pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Copy package management files
-COPY package*.json pnpm-lock.yaml ./
-
-# Install dependencies without strict lockfile version enforcement
-RUN pnpm install --no-frozen-lockfile
-
-# Copy source code and build
+# Copy all project files
 COPY . .
+
+# Install dependencies and build directly
+RUN pnpm install --no-frozen-lockfile --shamefully-hoist
 RUN pnpm run build
 
 # Stage 2: Serve static files with Nginx
 FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=0 /app/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

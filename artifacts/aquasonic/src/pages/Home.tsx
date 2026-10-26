@@ -20,34 +20,72 @@ function waHome() {
 
 const QR_WASH = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent("Hello Serenade Wash, I would like to book an appointment.")}`)}&bgcolor=0d2240&color=00c2e0&margin=5`;
 
-const JOURNEY_CARDS = [
+type BeforeAfterSliderConfig = {
+  id: string;
+  title: string;
+  beforeSrc: string;
+  afterSrc: string;
+  alt: string;
+};
+
+const journeyImage = (fileName: string) =>
+  `${import.meta.env.BASE_URL}images/${fileName}`;
+
+const BEFORE_AFTER_SLIDERS: BeforeAfterSliderConfig[] = [
+  {
+    id: "interior-revival",
+    title: "Interior Revival",
+    beforeSrc: journeyImage("journey-interior.jpg"),
+    afterSrc: journeyImage("journey-interior.jpg"),
+    alt: "Car dashboard, seats, and floor before and after interior detailing",
+  },
+  {
+    id: "exterior-perfection",
+    title: "Exterior Perfection",
+    beforeSrc: journeyImage("journey-exterior.webp"),
+    afterSrc: journeyImage("journey-exterior.webp"),
+    alt: "Car body before and after exterior detailing",
+  },
+  {
+    id: "wheel-tire-detailing",
+    title: "Wheel & Tire Detailing",
+    beforeSrc: journeyImage("journey-wheel.jpg"),
+    afterSrc: journeyImage("journey-wheel.jpg"),
+    alt: "Car wheel and tire before and after detailing",
+  },
+];
+
+const JOURNEY_CARDS: {
+  tag: string;
+  title: string;
+  img?: string;
+  alt: string;
+  text: string;
+  sliderId?: string;
+}[] = [
   {
     tag: "For the dreamers", title: "For the Dreamers",
     img: "https://www.aquasoniccarwash.com/wp-content/uploads/2025/01/Electric-off-road-pick-up-truck-600x324.webp",
     alt: "A sleek electric pickup truck",
     text: "Here's to those who know that driving isn't just about getting there. It's about the memories you make along the way—the open skies, the untamed roads, and the freedom to explore.",
-    beforeAfter: false,
   },
   {
     tag: "Interior Revival", title: "Interior Revival",
-    img: "https://www.aquasoniccarwash.com/wp-content/uploads/2024/10/Woman_car_window_sunset-600x400.webp",
+    sliderId: "interior-revival",
     alt: "Car interior before and after cleaning",
     text: "Experience the transformation from dusty, stained interiors to a spotless luxury cabin environment.",
-    beforeAfter: true,
   },
   {
     tag: "Exterior Perfection", title: "Exterior Perfection",
-    img: "https://www.aquasoniccarwash.com/wp-content/uploads/2024/10/Young_couple_selfie_desert-600x336.webp",
+    sliderId: "exterior-perfection",
     alt: "Car exterior before and after cleaning",
     text: "Watch your vehicle evolve from road-worn and muddy to glossy showroom brilliance.",
-    beforeAfter: true,
   },
   {
     tag: "Wheel & Tire Detailing", title: "Wheel & Tire Detailing",
-    img: "https://www.aquasoniccarwash.com/wp-content/uploads/2024/10/Middle_aged_couple_sunset-600x337.webp",
+    sliderId: "wheel-tire-detailing",
     alt: "Tire and rim before and after detailing",
     text: "Restore deep shine and premium finish to your rims and tires with professional detailing.",
-    beforeAfter: true,
   },
 ];
 
@@ -87,43 +125,191 @@ const PACKAGES = [
 ];
 
 /* ─── BEFORE/AFTER SLIDER ─── */
-function BeforeAfterSlider({ img, alt }: { img: string; alt: string }) {
+function BeforeAfterSlider({ slider }: { slider: BeforeAfterSliderConfig }) {
   const [pos, setPos] = useState(50);
-  const dragging = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const positionRef = useRef(50);
+  const pendingPositionRef = useRef(50);
+  const positionFrameRef = useRef<number | null>(null);
+  const hintFrameRef = useRef<number | null>(null);
+  const hintPlayedRef = useRef(false);
+  const draggingRef = useRef(false);
+  const pointerIdRef = useRef<number | null>(null);
 
-  const clamp = (v: number) => Math.max(2, Math.min(98, v));
+  const clamp = (value: number) => Math.max(0, Math.min(100, value));
 
-  const getPos = (clientX: number) => {
-    if (!ref.current) return 50;
-    const r = ref.current.getBoundingClientRect();
-    return clamp(((clientX - r.left) / r.width) * 100);
+  const updatePosition = useCallback((value: number) => {
+    const next = clamp(value);
+    positionRef.current = next;
+    pendingPositionRef.current = next;
+    if (positionFrameRef.current !== null) return;
+    positionFrameRef.current = requestAnimationFrame(() => {
+      setPos(pendingPositionRef.current);
+      positionFrameRef.current = null;
+    });
+  }, []);
+
+  const updatePositionImmediately = useCallback((value: number) => {
+    const next = clamp(value);
+    positionRef.current = next;
+    pendingPositionRef.current = next;
+    if (positionFrameRef.current !== null) {
+      cancelAnimationFrame(positionFrameRef.current);
+      positionFrameRef.current = null;
+    }
+    setPos(next);
+  }, []);
+
+  const stopHint = useCallback(() => {
+    if (hintFrameRef.current !== null) {
+      cancelAnimationFrame(hintFrameRef.current);
+      hintFrameRef.current = null;
+    }
+  }, []);
+
+  const getPosition = (clientX: number) => {
+    const bounds = ref.current?.getBoundingClientRect();
+    if (!bounds || bounds.width === 0) return positionRef.current;
+    return clamp(((clientX - bounds.left) / bounds.width) * 100);
   };
 
-  const onMouseDown = (e: React.MouseEvent) => { dragging.current = true; setPos(getPos(e.clientX)); };
-  const onMouseMove = (e: React.MouseEvent) => { if (dragging.current) setPos(getPos(e.clientX)); };
-  const onMouseUp = () => { dragging.current = false; };
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    stopHint();
+    draggingRef.current = true;
+    pointerIdRef.current = event.pointerId;
+    setIsDragging(true);
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updatePosition(getPosition(event.clientX));
+  };
 
-  const onTouchStart = (e: React.TouchEvent) => { dragging.current = true; setPos(getPos(e.touches[0].clientX)); };
-  const onTouchMove = (e: React.TouchEvent) => { if (dragging.current) setPos(getPos(e.touches[0].clientX)); };
-  const onTouchEnd = () => { dragging.current = false; };
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current || pointerIdRef.current !== event.pointerId) return;
+    updatePosition(getPosition(event.clientX));
+  };
+
+  const onPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== event.pointerId) return;
+    draggingRef.current = false;
+    pointerIdRef.current = null;
+    setIsDragging(false);
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    let next: number | null = null;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      next = positionRef.current - 5;
+    } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      next = positionRef.current + 5;
+    } else if (event.key === "Home") {
+      next = 0;
+    } else if (event.key === "End") {
+      next = 100;
+    }
+    if (next === null) return;
+    event.preventDefault();
+    stopHint();
+    updatePositionImmediately(next);
+  };
+
+  useEffect(() => {
+    const target = ref.current;
+    if (!target || typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (hintPlayedRef.current || draggingRef.current) return;
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      hintPlayedRef.current = true;
+      observer.unobserve(target);
+
+      const stops = [43, 57, 50];
+      let segment = 0;
+      let segmentStart = 0;
+      let segmentFrom = positionRef.current;
+
+      const animateHint = (time: number) => {
+        if (segmentStart === 0) segmentStart = time;
+        const progress = Math.min(1, (time - segmentStart) / 260);
+        const eased = progress * progress * (3 - 2 * progress);
+        const next = segmentFrom + (stops[segment] - segmentFrom) * eased;
+        positionRef.current = next;
+        pendingPositionRef.current = next;
+        setPos(next);
+
+        if (progress < 1) {
+          hintFrameRef.current = requestAnimationFrame(animateHint);
+          return;
+        }
+
+        segmentFrom = stops[segment];
+        segment += 1;
+        if (segment < stops.length) {
+          segmentStart = 0;
+          hintFrameRef.current = requestAnimationFrame(animateHint);
+        } else {
+          hintFrameRef.current = null;
+        }
+      };
+
+      hintFrameRef.current = requestAnimationFrame(animateHint);
+    }, { threshold: 0.45 });
+
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+      stopHint();
+      if (positionFrameRef.current !== null) {
+        cancelAnimationFrame(positionFrameRef.current);
+      }
+    };
+  }, [stopHint]);
+
+  const beforeOpacity = Math.min(1, Math.max(0, pos / 18));
+  const afterOpacity = Math.min(1, Math.max(0, (100 - pos) / 18));
 
   return (
-    <div className="ba-wrap" ref={ref}
-      onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
-      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
-      {/* Before (dirty) */}
-      <img className="ba-img ba-before-filter" src={img} alt={alt} draggable={false} />
-      {/* After (clean) clipped */}
-      <div className="ba-after" style={{ clipPath: `inset(0 0 0 ${pos}%)` }}>
-        <img src={img} alt={alt} draggable={false} />
+    <div
+      className={`ba-wrap${isDragging ? " is-dragging" : ""}`}
+      ref={ref}
+      role="slider"
+      tabIndex={0}
+      aria-label={`${slider.title}: ${slider.alt}`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(pos)}
+      aria-valuetext={`${Math.round(pos)} percent before image shown`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      onLostPointerCapture={onPointerEnd}
+      onKeyDown={onKeyDown}
+    >
+      <img
+        className="ba-img ba-after-image"
+        src={slider.afterSrc}
+        alt=""
+        draggable={false}
+        loading="lazy"
+        decoding="async"
+      />
+      <div className="ba-before" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>
+        <img
+          className="ba-img ba-before-filter"
+          src={slider.beforeSrc}
+          alt=""
+          draggable={false}
+          loading="lazy"
+          decoding="async"
+        />
       </div>
-      {/* Divider */}
       <div className="ba-divider" style={{ left: `${pos}%` }}>
         <div className="ba-handle">⇔</div>
       </div>
-      <span className="ba-label before">Before</span>
-      <span className="ba-label after">After</span>
+      <span className="ba-label before" style={{ opacity: beforeOpacity }}>Before</span>
+      <span className="ba-label after" style={{ opacity: afterOpacity }}>After</span>
     </div>
   );
 }
@@ -414,7 +600,7 @@ export default function Home() {
       </div>
 
       {/* JOURNEY / BEFORE-AFTER */}
-      <section className="sec sec-gray">
+      <section id="journey" className="sec sec-gray">
         <div className="container">
           <div className="journey-hdr rv">
             <p className="sec-label">We Are Here For The Journey</p>
@@ -425,8 +611,10 @@ export default function Home() {
             {JOURNEY_CARDS.map((card, i) => (
               <div key={i} className={`jcard rv d${i + 1}`}>
                 <div className="jcard-imgwrap">
-                  {card.beforeAfter ? (
-                    <BeforeAfterSlider img={card.img} alt={card.alt} />
+                  {card.sliderId ? (
+                    <BeforeAfterSlider
+                      slider={BEFORE_AFTER_SLIDERS.find((slider) => slider.id === card.sliderId)!}
+                    />
                   ) : (
                     <img src={card.img} alt={card.alt} loading="lazy" />
                   )}

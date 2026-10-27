@@ -2,13 +2,12 @@ FROM node:20
 WORKDIR /app
 
 # Enable pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10 --activate
 
 # Copy all project files
 COPY . .
 
 # Install dependencies allowing build scripts, then build
-RUN pnpm install --no-frozen-lockfile --shamefully-hoist --config.ignore-build-scripts=false
 RUN pnpm run build
 
 # Stage 2: Serve static files with Nginx
